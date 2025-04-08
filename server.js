@@ -1,28 +1,35 @@
 const express = require("express");
+const fs = require("fs");
 const cors = require("cors");
 const app = express();
-
-// Allow all origins (or specify just your domain)
-app.use(cors({
-  origin: ["http://127.0.0.1:5500", "https://levvrf.github.io"],
-  methods: ["GET", "POST"],
-  allowedHeaders: ["Content-Type"]
-}));
-
-app.use(express.json());
-
-// Your routes...
-app.get("/settings", (req, res) => {
-  res.json(/* your settings object */);
-});
-
-app.post("/settings", (req, res) => {
-  // Save logic here
-  res.json({ success: true });
-});
-
-// Start server
 const PORT = process.env.PORT || 3000;
+
+app.use(cors());
+app.use(express.json()); // to parse JSON bodies
+
+// 🔍 GET /settings - returns settings.json
+app.get("/settings", (req, res) => {
+  fs.readFile("settings.json", "utf8", (err, data) => {
+    if (err) {
+      console.error("❌ Error reading settings.json:", err);
+      return res.status(500).json({ error: "Failed to read settings" });
+    }
+    res.setHeader("Content-Type", "application/json");
+    res.send(data);
+  });
+});
+
+// 💾 POST /settings - overwrites settings.json
+app.post("/settings", (req, res) => {
+  fs.writeFile("settings.json", JSON.stringify(req.body, null, 2), "utf8", (err) => {
+    if (err) {
+      console.error("❌ Error writing settings.json:", err);
+      return res.status(500).json({ error: "Failed to save settings" });
+    }
+    res.json({ success: true });
+  });
+});
+
 app.listen(PORT, () => {
-  console.log("Server running on port", PORT);
+  console.log(`🚀 Server running at http://localhost:${PORT}`);
 });

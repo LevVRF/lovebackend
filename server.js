@@ -1,17 +1,35 @@
-const express = require('express');
-const fs = require('fs');
+const express = require("express");
+const fs = require("fs");
+const cors = require("cors");
 const app = express();
-app.use(express.json());
+const PORT = process.env.PORT || 3000;
 
-app.get('/settings', (req, res) => {
-  res.sendFile(__dirname + '/settings.json'); // ✅ safe and local
+app.use(cors());
+app.use(express.json()); // to parse JSON bodies
+
+// 🔍 GET /settings - returns settings.json
+app.get("/settings", (req, res) => {
+  fs.readFile("settings.json", "utf8", (err, data) => {
+    if (err) {
+      console.error("❌ Error reading settings.json:", err);
+      return res.status(500).json({ error: "Failed to read settings" });
+    }
+    res.setHeader("Content-Type", "application/json");
+    res.send(data);
+  });
 });
 
-app.post('/settings', (req, res) => {
-  fs.writeFileSync(__dirname + '/settings.json', JSON.stringify(req.body, null, 2));
-  res.json({ message: 'Settings saved!' });
+// 💾 POST /settings - overwrites settings.json
+app.post("/settings", (req, res) => {
+  fs.writeFile("settings.json", JSON.stringify(req.body, null, 2), "utf8", (err) => {
+    if (err) {
+      console.error("❌ Error writing settings.json:", err);
+      return res.status(500).json({ error: "Failed to save settings" });
+    }
+    res.json({ success: true });
+  });
 });
 
-app.listen(process.env.PORT || 3000, () => {
-  console.log('✅ Backend running');
+app.listen(PORT, () => {
+  console.log(`🚀 Server running at http://localhost:${PORT}`);
 });

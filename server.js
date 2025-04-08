@@ -7,6 +7,11 @@ const PORT = process.env.PORT || 3000;
 app.use(cors());
 app.use(express.json()); // to parse JSON bodies
 
+// 🔍 GET /keepalive - does nothing
+app.get("/keepalive", (req, res) => {  
+  res.send("pong");
+});
+
 // 🔍 GET /settings - returns settings.json
 app.get("/settings", (req, res) => {
   fs.readFile("settings.json", "utf8", (err, data) => {
@@ -19,7 +24,6 @@ app.get("/settings", (req, res) => {
     console.info("✅ Sent Settings file");
   });
 });
-
 // 💾 POST /settings - overwrites settings.json
 app.post("/settings", (req, res) => {
   fs.writeFile("settings.json", JSON.stringify(req.body, null, 2), "utf8", (err) => {

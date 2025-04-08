@@ -16,6 +16,7 @@ app.get("/settings", (req, res) => {
     }
     res.setHeader("Content-Type", "application/json");
     res.send(data);
+    console.info("✅ Sent Settings file");
   });
 });
 
@@ -27,9 +28,10 @@ app.post("/settings", (req, res) => {
       return res.status(500).json({ error: "Failed to save settings" });
     }
     res.json({ success: true });
+    console.info("✅ Updated Settings file ");
   });
 });
 
 app.listen(PORT, () => {
-  console.log(`🚀 Server running at http://localhost:${PORT}`);
+  console.log(`🚀 Server running`);
 });

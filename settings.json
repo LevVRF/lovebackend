@@ -2,5 +2,5 @@
   "PhraseUpdateInterval": 6,
   "RowOpacity": 0.3,
   "HeartBeat": true,
-  "ScrollSpeed": 60
+  "ScrollSpeed": 1
 }

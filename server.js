@@ -40,14 +40,16 @@ app.post("/settings", (req, res) => {
   });
 });
 
+const key = JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT_JSON);
 
 const drive = google.drive({
   version: "v3",
-  auth: new google.auth.GoogleAuth({
-    // service-account JSON you download from Google Cloud
-    keyFile: "./service-account.json",
-    scopes: ["https://www.googleapis.com/auth/drive.readonly"]
-  })
+  auth: new google.auth.JWT(
+    key.client_email,
+    null,
+    key.private_key,
+    ["https://www.googleapis.com/auth/drive.readonly"]
+  )
 });
 
 // cache list for 10 min to avoid hitting quota

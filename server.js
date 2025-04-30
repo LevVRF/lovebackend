@@ -85,15 +85,19 @@ app.get("/api/pgdrive-image", async (req, res) => {
   if (!fileId) return res.status(400).send("Missing fileId");
 
   if (cachedImageBuffers[fileId]) {
+    console.log("✅ Cache hit for", fileId);
     res.type("image/jpeg"); // or detect mime
     return res.send(cachedImageBuffers[fileId]);
   }
 
   try {
+    console.log("🔄 Cache miss for", fileId);
     const driveRes = await drive.files.get(
       { fileId, alt: "media" },
       { responseType: "stream" }
     );
+    console.log("✅ Fetched from Drive", fileId);
+    res.setHeader("Content-Type", driveRes.headers["content-type"]);
     driveRes.data.pipe(res);
   } catch (e) {
     res.status(500).send("Failed to fetch from Drive");

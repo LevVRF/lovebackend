@@ -2,6 +2,7 @@ const express = require("express");
 const fs = require("fs");
 const cors = require("cors");
 const { google } = require("googleapis");
+const sharp = require("sharp");
 const app = express();
 const PORT = process.env.PORT || 3000;
 
@@ -84,33 +85,33 @@ app.get("/api/pgdrive-image", async (req, res) => {
   const fileId = req.query.fileId;
   if (!fileId) return res.status(400).send("Missing fileId");
 
-  if (cachedImageBuffers[fileId]) {
-    console.log("✅ Cache hit for", fileId);
-    res.type("image/jpeg"); // or detect mime
-    return res.send(cachedImageBuffers[fileId]);
-  }
+  const jpgBuffer = await getResizedJPEG(fileId);
+  if (!jpgBuffer) return res.status(404).send("Image not found");
+  res.setHeader("Content-Type", "image/jpeg");
+  return res.send(jpgBuffer);
+  // if (cachedImageBuffers[fileId]) {
+  //   console.log("✅ Cache hit for", fileId);
+  //   res.type("image/jpeg"); // or detect mime
+  //   return res.send(cachedImageBuffers[fileId]);
+  // }
 
-  try {
-    console.log("🔄 Cache miss for", fileId);
-    const driveRes = await drive.files.get(
-      { fileId, alt: "media" },
-      { responseType: "stream" }
-    );
-    console.log("✅ Fetched from Drive", fileId);
-    res.setHeader("Content-Type", driveRes.headers["content-type"]);
-    res.type("image/jpeg"); // or detect mime
-    driveRes.data.pipe(res);
-    cachedImageBuffers[fileId] = Buffer.from(res.data);
-  } catch (e) {
-    res.status(500).send("Failed to fetch from Drive");
-  }
+  // try {
+  //   console.log("🔄 Cache miss for", fileId);
+  //   const driveRes = await drive.files.get(
+  //     { fileId, alt: "media" },
+  //     { responseType: "stream" }
+  //   );
+  //   console.log("✅ Fetched from Drive", fileId);
+  //   res.setHeader("Content-Type", driveRes.headers["content-type"]);
+  //   res.type("image/jpeg"); // or detect mime
+  //   driveRes.data.pipe(res);
+  //   cachedImageBuffers[fileId] = Buffer.from(res.data);
+  // } catch (e) {
+  //   res.status(500).send("Failed to fetch from Drive");
+  // }
 });
 
 
-app.listen(PORT, async () => {
-  console.log(`🚀 Server running`);  
-  preloadDriveImages();
-});
 
 async function preloadDriveImages() {
   const fileIds = await listDriveImages(); // should return just the Drive file IDs
@@ -138,3 +139,36 @@ async function preloadDriveImages() {
 setInterval(() => {
   fetch(`https://lovebackend.onrender.com/keepalive`);
 }, 45_000);
+
+// Cached image buffer: cachedImageBuffers[fileId] = <Buffer>
+async function getResizedJPEG(fileId) {
+  let buffer;
+
+  if (cachedImageBuffers[fileId]) {
+    buffer = cachedImageBuffers[fileId];
+  } else {
+    const res = await drive.files.get(
+      { fileId, alt: "media" },
+      { responseType: "arraybuffer" }
+    );
+    buffer = Buffer.from(res.data);
+  }
+
+  const outputBuffer = await sharp(buffer)
+    .resize(800, 1200, {
+      fit: "cover",
+      position: "center",
+    })
+    .jpeg({ quality: 80 }) // optional: adjust compression
+    .toBuffer();
+
+  return outputBuffer;
+}
+
+
+
+
+app.listen(PORT, async () => {
+  console.log(`🚀 Server running`);  
+  preloadDriveImages();
+});

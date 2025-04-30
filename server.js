@@ -122,8 +122,13 @@ async function preloadDriveImages() {
         { fileId, alt: "media" },
         { responseType: "arraybuffer" }
       );
-
-      cachedImageBuffers[fileId] = Buffer.from(res.data);
+      cachedImageBuffers[fileId] = await sharp(Buffer.from(res.data))
+                                              .resize(800, 1200, {
+                                                fit: "cover",
+                                                position: "center",
+                                              })
+                                              .jpeg({ quality: 80 }) // optional: adjust compression
+                                              .toBuffer();
       console.log(`✅ Preloaded image ${fileId}`);
     } catch (e) {
       console.warn(`❌ Failed to preload ${fileId}`, e.message);
@@ -146,6 +151,7 @@ async function getResizedJPEG(fileId) {
 
   if (cachedImageBuffers[fileId]) {
     buffer = cachedImageBuffers[fileId];
+    return buffer;
   } else {
     const res = await drive.files.get(
       { fileId, alt: "media" },

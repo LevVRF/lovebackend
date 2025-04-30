@@ -40,11 +40,12 @@ app.post("/settings", (req, res) => {
   });
 });
 
+
 const drive = google.drive({
   version: "v3",
   auth: new google.auth.GoogleAuth({
     // service-account JSON you download from Google Cloud
-    keyFile: "service-account.json",
+    keyFile: "./service-account.json",
     scopes: ["https://www.googleapis.com/auth/drive.readonly"]
   })
 });
@@ -123,3 +124,10 @@ async function preloadDriveImages() {
   await Promise.all(preloadTasks); // Wait until all are done
   console.log("🎉 All images preloaded");
 }
+
+
+/* keep Render / Heroku awake */
+setInterval(() => {
+  fetch(`https://lovebackend.onrender.com/keepalive`).catch(() => {});
+  wss.clients.forEach(ws => ws.readyState === 1 && ws.ping());
+}, 45_000);

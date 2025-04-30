@@ -130,6 +130,5 @@ async function preloadDriveImages() {
 
 /* keep Render / Heroku awake */
 setInterval(() => {
-  fetch(`https://lovebackend.onrender.com/keepalive`).catch(() => {});
-  wss.clients.forEach(ws => ws.readyState === 1 && ws.ping());
+  fetch(`https://lovebackend.onrender.com/keepalive`);
 }, 45_000);

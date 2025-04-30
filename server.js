@@ -72,7 +72,7 @@ async function listDriveImages() {
 /* serve the list as JSON */
 app.get("/images.json", async (_, res) => {
   try {
-    if (imgList == null) imgList = await listDriveImages();
+    imgList = await listDriveImages();
     res.json(imgList);
   } catch (e) {
     console.error("Drive error:", e);

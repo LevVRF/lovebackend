@@ -56,6 +56,7 @@ let driveCache = { ts: 0, list: [] };
 async function listDriveImages() {
   if (Date.now() - driveCache.ts < 10 * 60_000) return driveCache.list;
 
+  console.log(drive);
   const res = await drive.files.list({
     q: `mimeType contains 'image/'`,
     fields: "files(id,name,mimeType)"

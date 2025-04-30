@@ -41,7 +41,7 @@ app.post("/settings", (req, res) => {
 });
 
 const key = JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT_JSON);
-
+console.log(key.client_email);
 const drive = google.drive({
   version: "v3",
   auth: new google.auth.JWT(

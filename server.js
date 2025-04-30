@@ -98,7 +98,9 @@ app.get("/api/pgdrive-image", async (req, res) => {
     );
     console.log("✅ Fetched from Drive", fileId);
     res.setHeader("Content-Type", driveRes.headers["content-type"]);
+    res.type("image/jpeg"); // or detect mime
     driveRes.data.pipe(res);
+    cachedImageBuffers[fileId] = Buffer.from(res.data);
   } catch (e) {
     res.status(500).send("Failed to fetch from Drive");
   }

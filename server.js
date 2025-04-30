@@ -279,21 +279,22 @@ async function checkForNewImages() {
 app.listen(PORT, async () => {
   console.log(`🚀 Server running`);
 
-  // Run the initial check for new images in the background
-  (async () => {
-    try {
-      await checkForNewImages();
-    } catch (e) {
-      console.error("❌ Error during initial check for new files:", e.message);
-    }
-  })();
-
-  // Periodically check for new images every 5 seconds without blocking the main thread
-  setInterval(async () => {
-    try {
-      await checkForNewImages();
-    } catch (e) {
-      console.error("❌ Error during periodic check for new files:", e.message);
-    }
-  }, 5_000);
 });
+
+// Run the initial check for new images in the background
+(async () => {
+  try {
+    await checkForNewImages();
+  } catch (e) {
+    console.error("❌ Error during initial check for new files:", e.message);
+  }
+})();
+
+// Periodically check for new images every 5 seconds without blocking the main thread
+setInterval(async () => {
+  try {
+    await checkForNewImages();
+  } catch (e) {
+    console.error("❌ Error during periodic check for new files:", e.message);
+  }
+}, 5_000);

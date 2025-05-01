@@ -357,13 +357,13 @@ app.listen(PORT, () => {
 (async () => {
   // Run the initial check
   checkForNewImages().catch((err) => {
-    error("❌ Initial check failed:", err.message);
+    console.error("❌ Initial check failed:", err.message);
   });
 
   // Periodically check for new images every 5 seconds
   setInterval(() => {
     checkForNewImages().catch((err) => {
-      error("❌ Periodic check failed:", err.message);
+      console.error("❌ Periodic check failed:", err.message);
     });
   }, 5_000);
 })(); // Immediately invoked function to start the preload process

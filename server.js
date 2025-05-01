@@ -330,7 +330,6 @@ app.listen(PORT, () => {
   convertAll()
     .then(() => console.log("🖼️ Initial conversion done."))
     .catch(err => console.error("❌ Initial conversion failed:", err));
-  console.log(`📡 API available at ${SELF_URL}/api/pgdrive-image`);
 });
 
 process.on("uncaughtException", (err) => {

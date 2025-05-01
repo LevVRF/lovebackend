@@ -41,7 +41,7 @@ app.get("/settings", (req, res) => {
     }
     res.setHeader("Content-Type", "application/json");
     res.send(data);
-    info("✅ Sent Settings file");
+    console.info("✅ Sent Settings file");
   });
 });
 // 💾 POST /settings - overwrites settings.json
@@ -52,7 +52,7 @@ app.post("/settings", (req, res) => {
       return res.status(500).json({ error: "Failed to save settings" });
     }
     res.json({ success: true });
-    info("✅ Updated Settings file ");
+    console.info("✅ Updated Settings file ");
   });
 });
 
@@ -284,7 +284,7 @@ async function processFile(fileId) {
       cacheVideo(fileId, buffer, name);
     }
   } catch (e) {
-    warn(`❌ Failed to process file ${fileId}:`, e.message);
+    console.warn(`❌ Failed to process file ${fileId}:`, e.message);
   }
 }
 
@@ -323,7 +323,7 @@ async function checkForNewImages() {
       const extB = getImgData(b)?.name.split(".").pop().toLowerCase();
       return extensionPriority.indexOf(extA) - extensionPriority.indexOf(extB);
     });
-    
+
     if (newFileIds.length > 0) {
       log("✨ Preloading new files...");
       (async () => {
@@ -351,7 +351,10 @@ async function processInBatches(items, processFn) {
 // Start the server
 app.listen(PORT, () => {
   log(`🚀 Server running`);
+});
 
+
+(async () => {
   // Run the initial check
   checkForNewImages().catch((err) => {
     error("❌ Initial check failed:", err.message);
@@ -363,4 +366,4 @@ app.listen(PORT, () => {
       error("❌ Periodic check failed:", err.message);
     });
   }, 5_000);
-});
+})(); // Immediately invoked function to start the preload process

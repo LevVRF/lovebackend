@@ -6,8 +6,17 @@ const { google } = require("googleapis");
 const sharp = require("sharp");
 const heicConvert = require("heic-convert");
 const app = express();
+const pLimit = require("p-limit").default;
+const compression = require("compression");
+
+
+
 const PORT = process.env.PORT || 3000;
 const cfg = dotenv.config({ path: "./.env" });
+
+
+const limit = pLimit(5); // 5 concurrent downloads
+let runningPreload = false; // Flag to prevent multiple concurrent checks
 let imgList = null;
 let imgWithMimeList = null;
 let cachedImageBuffers = {};   // key: fileId, value: Buffer
@@ -16,6 +25,7 @@ const getData = (fileId) => getImgData(fileId);
 
 app.use(cors());
 app.use(express.json()); // to parse JSON bodies
+app.use(compression());
 
 // 🔍 GET /keepalive - does nothing
 app.get("/keepalive", (req, res) => {  
@@ -26,28 +36,33 @@ app.get("/keepalive", (req, res) => {
 app.get("/settings", (req, res) => {
   fs.readFile("settings.json", "utf8", (err, data) => {
     if (err) {
-      console.error("❌ Error reading settings.json:", err);
+      error("❌ Error reading settings.json:", err);
       return res.status(500).json({ error: "Failed to read settings" });
     }
     res.setHeader("Content-Type", "application/json");
     res.send(data);
-    console.info("✅ Sent Settings file");
+    info("✅ Sent Settings file");
   });
 });
 // 💾 POST /settings - overwrites settings.json
 app.post("/settings", (req, res) => {
   fs.writeFile("settings.json", JSON.stringify(req.body, null, 2), "utf8", (err) => {
     if (err) {
-      console.error("❌ Error writing settings.json:", err);
+      error("❌ Error writing settings.json:", err);
       return res.status(500).json({ error: "Failed to save settings" });
     }
     res.json({ success: true });
-    console.info("✅ Updated Settings file ");
+    info("✅ Updated Settings file ");
   });
 });
 
-const key = JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT_JSON) ? JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT_JSON) : cfg;
-console.log(key.client_email);
+function log(...args) {
+  console.log(`[${new Date().toISOString()}]`, ...args);
+}
+
+
+const key = JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT_JSON);
+log(key.client_email);
 const drive = google.drive({
   version: "v3",
   auth: new google.auth.JWT(
@@ -61,30 +76,27 @@ const drive = google.drive({
 // cache list for 10 min to avoid hitting quota
 let driveCache = { ts: 0, list: [] };
 async function listDriveImages(forceRefresh = false) {
-  // If not forcing refresh and cache is still valid, return cached list
   if (!forceRefresh && Date.now() - driveCache.ts < 10 * 60_000) {
     return driveCache.list;
   }
 
   try {
     const res = await drive.files.list({
-      q: `mimeType contains 'image/' or mimeType = 'video/mp4'`, // Include MP4 files
+      q: `mimeType contains 'image/' or mimeType = 'video/mp4'`,
       fields: "files(id,name,mimeType)",
     });
-
-    // Update the cache with the new data
-    const urls = res.data.files.map((f) => f.id);
 
     imgWithMimeList = res.data.files.map((f) => ({
       id: f.id,
       name: f.name,
       mimeType: f.mimeType,
+      timestamp: Date.now(), // Add timestamp for cache eviction
     }));
 
-    driveCache = { ts: Date.now(), list: urls };
-    return urls;
+    driveCache = { ts: Date.now(), list: imgWithMimeList.map((f) => f.id) };
+    return driveCache.list;
   } catch (e) {
-    console.error("❌ Error fetching files from Google Drive:", e.message);
+    error("❌ Error fetching files from Google Drive:", e.message);
     return [];
   }
 }
@@ -95,7 +107,7 @@ app.get("/images.json", async (_, res) => {
     await listDriveImages();
     res.json(imgWithMimeList);
   } catch (e) {
-    console.error("Drive error:", e);
+    error("Drive error:", e);
     res.status(500).json({ error: "Drive fetch failed" });
   }
 });
@@ -163,7 +175,7 @@ async function getResizedJPEG(fileId, mimeType) {
         format: "JPEG",
         quality: 0.9
       });
-      console.log(`✅ Converted HEIC to JPEG: ${getData(fileId).name}`);
+      log(`✅ Converted HEIC to JPEG: ${getData(fileId).name}`);
     }
 
     const outputBuffer = await sharp(buffer)
@@ -179,122 +191,176 @@ async function getResizedJPEG(fileId, mimeType) {
     return outputBuffer;
 
   }catch (e) {
-    console.error(`Error fetching image: ${getData(fileId).name}\n${e.message}`);
+    error(`Error fetching image: ${getData(fileId).name}\n${e.message}`);
     return null;
   }
 }
 
 function getImgData(fileId) {
+
+  if (!imgWithMimeList) return null;
+
   const file = imgWithMimeList.find(f => f.id === fileId);
   if (!file) return null;
   const { id, mimeType, name } = file;
   return { fileId: id, mimeType, name };
+
 }
+// Utility to fetch file data from Google Drive
+async function fetchFileData(fileId) {
+  const res = await drive.files.get(
+    { fileId, alt: "media" },
+    { responseType: "arraybuffer" }
+  );
+  return Buffer.from(res.data);
+}
+
+// Convert HEIC/HEIF to JPEG
+async function convertHeicToJpeg(fileId, buffer, fileName) {
+  return new Promise((resolve, reject) => {
+    setImmediate(async () => {
+      try {
+        const jpegBuffer = await heicConvert({
+          buffer,
+          format: "JPEG",
+          quality: 0.9,
+        });
+        log(`✅ Converted HEIC to JPEG: ${fileName}`);        
+        await resizeAndCacheImage(fileId, jpegBuffer, fileName);
+        resolve(jpegBuffer);
+      } catch (e) {
+        error(`❌ Error converting HEIC to JPEG: ${fileName}`, e.message);
+        reject(e);
+      }
+    });
+  });
+}
+
+// Resize and cache an image
+async function resizeAndCacheImage(fileId, buffer, fileName) {
+  if (cachedImageBuffers[fileId]) {
+    log(`ℹ️ Image already cached: ${fileName}`);
+    return;
+  }
+  try {
+    const resizedBuffer = await sharp(buffer)
+      .resize(800, 1200, { fit: "cover", position: "center" })
+      .jpeg({ quality: 80 })
+      .toBuffer();
+    cachedImageBuffers[fileId] = resizedBuffer;
+    log(`✅ Preloaded image: ${fileName}`);
+  } catch (e) {
+    error(`❌ Error resizing image: ${fileName}`, e.message);
+    throw e;
+  }
+}
+
+// Cache MP4 files directly
+function cacheVideo(fileId, buffer, fileName) {
+  cachedImageBuffers[fileId] = buffer;
+  log(`✅ Preloaded video: ${fileName}`);
+}
+
+// Process a single file (image or video)
+async function processFile(fileId) {
+  try {
+    const fileData = getImgData(fileId);
+    if (!fileData) return;
+
+    const { mimeType, name } = fileData;
+    const buffer = await fetchFileData(fileId);
+
+    if (mimeType.startsWith("image/")) {
+      if (mimeType === "image/heif" || mimeType === "image/heic") {
+        (async () => {
+          convertHeicToJpeg(fileId,buffer, name);
+        })();
+      } else {
+        (async () => {
+          await resizeAndCacheImage(fileId, buffer, name);
+        })();
+      }
+    } else if (mimeType === "video/mp4") {
+      cacheVideo(fileId, buffer, name);
+    }
+  } catch (e) {
+    warn(`❌ Failed to process file ${fileId}:`, e.message);
+  }
+}
+
+// Remove deleted files from the cache
+function removeDeletedFiles(removedFileIds) {
+  log("🗑️ Cleaning up removed files...");
+  removedFileIds.forEach((fileId) => {
+    delete cachedImageBuffers[fileId];
+    const index = imgWithMimeList.findIndex((img) => img.id === fileId);
+    if (index !== -1) {
+      log(`🗑️ Removed file from cache: ${imgWithMimeList[index].name}`);
+      imgWithMimeList.splice(index, 1);
+    }
+  });
+  log("🗑️ Finished cleaning up removed files.");
+}
+
+// Check for new and removed files
 async function checkForNewImages() {
   try {
-    // Force refresh to get the latest list of files (images and videos)
-    const currentFileIds = await listDriveImages(true); // Pass true to bypass cache
-    const cachedFileIds = Object.keys(cachedImageBuffers); // Get the cached file IDs
+    if (runningPreload) return; // Prevent multiple concurrent checks
+    log("🔍 Checking for new and removed files...");
 
-    // Find new file IDs that are not in the cache
+    const currentFileIds = await listDriveImages(true);
+    const cachedFileIds = Object.keys(cachedImageBuffers);
+
     const newFileIds = currentFileIds.filter((fileId) => !cachedFileIds.includes(fileId));
-
-    // Find removed file IDs that are in the cache but not in the current list
     const removedFileIds = cachedFileIds.filter((fileId) => !currentFileIds.includes(fileId));
 
-    // Preload new files (images and videos)
+    log(`🔍 Found ${newFileIds.length} new file(s) and ${removedFileIds.length} removed file(s).`);
+
+    // Sort new files by extension: jpg, png, mp4, heic
+    const extensionPriority = ["jpg", "png", "mp4", "heic"];
+    newFileIds.sort((a, b) => {
+      const extA = getImgData(a)?.name.split(".").pop().toLowerCase();
+      const extB = getImgData(b)?.name.split(".").pop().toLowerCase();
+      return extensionPriority.indexOf(extA) - extensionPriority.indexOf(extB);
+    });
+    
     if (newFileIds.length > 0) {
-      console.log(`🔍 Found ${newFileIds.length} new file(s). Preloading...`);
-
-      const preloadTasks = newFileIds.map(async (fileId) => {
-        try {
-          const fileData = getImgData(fileId);
-          if (!fileData) return;
-
-          const { mimeType } = fileData;
-
-          const res = await drive.files.get(
-            { fileId, alt: "media" },
-            { responseType: "arraybuffer" }
-          );
-          let buffer = Buffer.from(res.data);
-
-          if (mimeType.startsWith("image/")) {
-            // Convert HEIC/HEIF to JPEG if needed
-            if (mimeType === "image/heif" || mimeType === "image/heic") {
-              buffer = await heicConvert({
-                buffer,
-                format: "JPEG",
-                quality: 0.9,
-              });
-              console.log(`✅ Pre-converted HEIC to JPEG: ${fileData.name}`);
-            }
-
-            // Resize and cache the image
-            cachedImageBuffers[fileId] = await sharp(buffer)
-              .resize(800, 1200, {
-                fit: "cover",
-                position: "center",
-              })
-              .jpeg({ quality: 80 })
-              .toBuffer();
-
-            console.log(`✅ Preloaded image: ${fileData.name}`);
-          } else if (mimeType === "video/mp4") {
-            // Cache MP4 files directly
-            cachedImageBuffers[fileId] = buffer;
-            console.log(`✅ Preloaded video: ${fileData.name}`);
-          }
-        } catch (e) {
-          console.warn(`❌ Failed to preload file ${getData(fileId)?.name}`, e.message);
-        }
-      });
-
-      await Promise.all(preloadTasks); // Wait for all preload tasks to complete
-      console.log("🎉 Finished preloading new files.");
+      log("✨ Preloading new files...");
+      (async () => {
+        processInBatches(newFileIds, processFile);
+      })();
     } else {
-      console.log("🔍 No new files found.");
+      log("🔍 No new files to preload.");
     }
 
-    // Remove deleted files from the cache
     if (removedFileIds.length > 0) {
-      console.log(`🗑️ Found ${removedFileIds.length} removed file(s). Cleaning up...`);
-
-      removedFileIds.forEach((fileId) => {
-        delete cachedImageBuffers[fileId]; // Remove from the buffer cache
-        const index = imgWithMimeList.findIndex((img) => img.id === fileId);
-        if (index !== -1) {
-          console.log(`🗑️ Removed file from cache: ${imgWithMimeList[index].name}`);
-          imgWithMimeList.splice(index, 1); // Remove from the mime list
-        }
-      });
-
-      console.log("🗑️ Finished cleaning up removed files.");
+      removeDeletedFiles(removedFileIds);
     }
   } catch (e) {
-    console.error("❌ Error checking for new files:", e.message);
+    error("❌ Error checking for new files:", e.message);
   }
 }
 
-app.listen(PORT, async () => {
-  console.log(`🚀 Server running`);
+// Helper function to process items in batches
+async function processInBatches(items, processFn) {
+  runningPreload = true; // Set the flag to indicate that the preload is running
+  (async () => { Promise.all(items.map(id => limit(() => processFn(id))))})();
+  runningPreload = false; // Set the flag to indicate that the preload is no longer running
+}
 
+// Start the server
+app.listen(PORT, () => {
+  log(`🚀 Server running`);
+
+  // Run the initial check
+  checkForNewImages().catch((err) => {
+    error("❌ Initial check failed:", err.message);
+  });
+
+  // Periodically check for new images every 5 seconds
+  setInterval(() => {
+    checkForNewImages().catch((err) => {
+      error("❌ Periodic check failed:", err.message);
+    });
+  }, 5_000);
 });
-
-// Run the initial check for new images in the background
-(async () => {
-  try {
-    await checkForNewImages();
-  } catch (e) {
-    console.error("❌ Error during initial check for new files:", e.message);
-  }
-})();
-
-// Periodically check for new images every 5 seconds without blocking the main thread
-setInterval(async () => {
-  try {
-    await checkForNewImages();
-  } catch (e) {
-    console.error("❌ Error during periodic check for new files:", e.message);
-  }
-}, 5_000);
